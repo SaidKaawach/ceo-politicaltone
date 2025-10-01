@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CEO Twitter Tone Analysis</title>
+    <!-- Tailwind CSS CDN for styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                    },
+                }
+            }
+        }
+    </script>
+    <!-- D3.js CDN for data manipulation and visualization -->
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        .election-line {
+            stroke: #ef4444; /* Red for emphasis */
+            stroke-width: 2;
+            stroke-dasharray: 4;
+            opacity: 0.7;
+        }
+        .line-label {
+            fill: #ef4444;
+            font-size: 10px;
+            font-weight: 600;
+        }
+        .axis text {
+            fill: #4b5563;
+        }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen p-4 sm:p-8 font-sans">
+
+    <div class="max-w-4xl mx-auto">
+        <header class="text-center mb-8">
+            <h1 class="text-3xl font-extrabold text-gray-900 mb-2">CEO Tweet Tone Trend</h1>
+            <p class="text-gray-600">Share of 'Democrat' Tone (DorR2) by Year, aggregated by CEO.</p>
+        </header>
+
+        <!-- Control Panel -->
+        <div class="bg-white p-6 rounded-xl shadow-lg mb-8 border border-gray-200">
+            <div class="flex flex-col sm:flex-row items-center justify-center space-y-4 sm:space-y-0 sm:space-x-4">
+                <label for="ceo-select" class="font-medium text-gray-700 whitespace-nowrap">Select CEO:</label>
+                <select id="ceo-select" class="w-full sm:w-64 p-2 border border-gray-300 rounded-lg shadow-sm focus:ring-indigo-500 focus:border-indigo-500 transition duration-150 ease-in-out">
+                    <!-- Options will be populated by JavaScript -->
+                </select>
+            </div>
+        </div>
+
+        <!-- Chart Container -->
+        <div class="bg-white p-6 rounded-xl shadow-lg border border-gray-200">
+            <div id="chart-area" class="w-full">
+                <!-- D3 chart will be drawn here -->
+            </div>
+            <p class="text-sm text-gray-500 mt-4 italic">
+                Vertical dashed lines indicate U.S. Presidential Election Years (2012, 2016, 2020) to highlight potential shifts in tone.
+            </p>
+        </div>
+
+        <div id="error-message" class="hidden mt-4 p-3 bg-red-100 border border-red-400 text-red-700 rounded-lg" role="alert">
+            <span class="font-medium">Error:</span> Could not load the dataset. Please ensure the file 'ceo.csv' is available.
+        </div>
+    </div>
+
+    <script type="module">
+        // Global variable to store the parsed data
+        let allData = [];
+        let uniqueCEOs = new Map(); // Stores unique CEOs {ceo_uname: {FullName}}
+
+        // Chart dimensions
+        const margin = { top: 20, right: 30, bottom: 50, left: 60 };
+        const chartArea = d3.select("#chart-area");
+        let width = chartArea.node().clientWidth - margin.left - margin.right;
+        let height = 400 - margin.top - margin.bottom;
+
+        // Election years to highlight
+        const electionYears = [2012, 2016, 2020];
+
+        // Function to process data: aggregate DorR2 by Year
+        function aggregateData(ceoUname) {
+            const filteredData = allData.filter(d => d.ceo_uname === ceoUname);
+
+            // Group by Year and calculate the average DorR2
+            const aggregated = Array.from(d3.group(filteredData, d => d.Year), ([year, values]) => ({
+                year: +year,
+                avgDorR2: d3.mean(values, d => d.DorR2)
+            }));
+
+            // Sort by year
+            return aggregated.sort((a, b) => a.year - b.year);
+        }
+
+        // Function to draw or update the chart
+        function updateChart(ceoUname) {
+            const data = aggregateData(ceoUname);
+
+            // 1. Clear previous content
+            chartArea.html('');
+
+            if (data.length === 0) {
+                chartArea.html('<p class="text-center text-gray-500 p-8">No tweet data available for this CEO.</p>');
+                return;
+            }
+
+            // 2. Responsive Width Adjustment (on update or resize)
+            width = chartArea.node().clientWidth - margin.left - margin.right;
+
+            // 3. Create SVG element
+            const svg = chartArea.append("svg")
+                .attr("width", width + margin.left + margin.right)
+                .attr("height", height + margin.top + margin.bottom)
+                .append("g")
+                .attr("transform", `translate(${margin.left},${margin.top})`);
+
+            // 4. Scales
+            const xExtent = d3.extent(data, d => d.year);
+            const yMin = d3.min(allData, d => d.DorR2) * 0.9;
+            const yMax = d3.max(allData, d => d.DorR2) * 1.05;
+
+            const xScale = d3.scaleLinear()
+                .domain([xExtent[0] - 0.5, xExtent[1] + 0.5]) // Extend domain for padding
+                .range([0, width]);
+
+            const yScale = d3.scaleLinear()
+                .domain([yMin, yMax])
+                .range([height, 0]);
+
+            // 5. Draw Axes
+            // X-Axis (Year)
+            const xAxis = svg.append("g")
+                .attr("transform", `translate(0,${height})`)
+                .call(d3.axisBottom(xScale).tickFormat(d3.format("d")).ticks(xExtent[1] - xExtent[0] + 1)); // Ensure integer years are shown
+
+            xAxis.append("text")
+                .attr("class", "text-sm font-medium")
+                .attr("x", width / 2)
+                .attr("y", 40)
+                .attr("fill", "#1f2937")
+                .text("Year of Tweet");
+
+            // Y-Axis (DorR2)
+            const yAxis = svg.append("g")
+                .call(d3.axisLeft(yScale));
+
+            yAxis.append("text")
+                .attr("class", "text-sm font-medium")
+                .attr("transform", "rotate(-90)")
+                .attr("y", -margin.left + 15)
+                .attr("x", -height / 2)
+                .attr("dy", "1em")
+                .attr("fill", "#1f2937")
+                .style("text-anchor", "middle")
+                .text("Average Share of 'Democrat' Tone (DorR2)");
+
+            // 6. Draw Election Lines (Events)
+            electionYears.forEach(year => {
+                if (year >= xExtent[0] && year <= xExtent[1]) {
+                    const xPos = xScale(year);
+                    // Vertical line
+                    svg.append("line")
+                        .attr("class", "election-line")
+                        .attr("x1", xPos)
+                        .attr("y1", 0)
+                        .attr("x2", xPos)
+                        .attr("y2", height);
+
+                    // Label (Above the line)
+                    svg.append("text")
+                        .attr("class", "line-label")
+                        .attr("x", xPos)
+                        .attr("y", -5)
+                        .attr("text-anchor", "middle")
+                        .text(`${year} Election`);
+                }
+            });
+
+
+            // 7. Draw the Line Path
+            const line = d3.line()
+                .x(d => xScale(d.year))
+                .y(d => yScale(d.avgDorR2));
+
+            svg.append("path")
+                .datum(data)
+                .attr("fill", "none")
+                .attr("stroke", "#4f46e5") // Indigo color
+                .attr("stroke-width", 3)
+                .attr("d", line);
+
+            // 8. Draw Scatter Plot Points
+            svg.selectAll("circle")
+                .data(data)
+                .enter()
+                .append("circle")
+                .attr("cx", d => xScale(d.year))
+                .attr("cy", d => yScale(d.avgDorR2))
+                .attr("r", 5)
+                .attr("fill", "#4f46e5")
+                .attr("stroke", "white")
+                .attr("stroke-width", 2)
+                .append("title") // Tooltip
+                .text(d => `Year: ${d.year}\nAverage DorR2: ${d.avgDorR2.toFixed(3)}`);
+        }
+
+        // Main function to load data and set up controls
+        async function init() {
+            const selectElement = document.getElementById('ceo-select');
+
+            try {
+                // Use the path provided by the canvas environment
+                const filePath = 'ceo.csv';
+
+                // Load and parse the CSV data
+                allData = await d3.csv(filePath, (d) => {
+                    // Pre-process and sanitize data types
+                    return {
+                        // Date column is the first unnamed column, we don't need it.
+                        Year: d.Year ? +d.Year : null,
+                        DorR2: d.DorR2 ? +d.DorR2 : null, // The key variable
+                        ceo_uname: d.ceo_uname,
+                        FN: d.FN, // Keeping FN and LN for display creation
+                        LN: d.LN,
+                        // Filter out rows with missing key data immediately
+                    };
+                });
+
+                // Filter out invalid rows (where Year or DorR2 is null/NaN)
+                allData = allData.filter(d => d.Year && !isNaN(d.DorR2));
+
+
+                // Get unique CEOs for the dropdown
+                d3.group(allData, d => d.ceo_uname).forEach((group, uname) => {
+                    if (group.length > 0) {
+                        // --- EDIT: Combine FN and LN into FullName for display ---
+                        const FN = group[0].FN || '';
+                        const LN = group[0].LN || '';
+                        uniqueCEOs.set(uname, { FullName: `${FN.trim()} ${LN.trim()}`.trim() });
+                    }
+                });
+
+                // Populate the dropdown
+                uniqueCEOs.forEach(({ FullName }, uname) => {
+                    const option = document.createElement('option');
+                    option.value = uname;
+                    // Use the combined name for a clean display
+                    option.textContent = `${FullName} (@${uname})`;
+                    selectElement.appendChild(option);
+                });
+
+                // Set up event listener for the dropdown change
+                selectElement.addEventListener('change', (event) => {
+                    updateChart(event.target.value);
+                });
+
+                // Initial chart draw for the first CEO
+                if (uniqueCEOs.size > 0) {
+                    const firstCeoUname = uniqueCEOs.keys().next().value;
+                    selectElement.value = firstCeoUname;
+                    updateChart(firstCeoUname);
+                } else {
+                    chartArea.html('<p class="text-center text-gray-500 p-8">No valid CEO data found in the dataset.</p>');
+                }
+
+                // Handle window resize for responsiveness
+                window.addEventListener('resize', () => {
+                    // Throttle the update on resize to prevent performance issues
+                    if (window.resizeTimer) clearTimeout(window.resizeTimer);
+                    window.resizeTimer = setTimeout(() => {
+                        updateChart(selectElement.value);
+                    }, 200);
+                });
+
+
+            } catch (error) {
+                console.error("Error loading or processing data:", error);
+                document.getElementById('error-message').classList.remove('hidden');
+                chartArea.html('<p class="text-center text-gray-500 p-8">Failed to load the dataset.</p>');
+            }
+        }
+
+        // Initialize the application
+        init();
+
+    </script>
+</body>
+</html>
